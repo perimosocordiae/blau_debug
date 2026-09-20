@@ -1,0 +1,11 @@
+[package]
+name = "blau_debug"
+version = "0.1.0"
+authors = ["CJ Carey <perimosocordiae@gmail.com>"]
+edition = "2024"
+
+[dependencies]
+blau_api = { git = "https://github.com/perimosocordiae/blau_api" }
+log = "0.4"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
