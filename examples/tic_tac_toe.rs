@@ -151,6 +151,7 @@ impl DynSafeGameAPI for TicTacToe {
         if !self.game_over {
             return Err("Game is not finished".into());
         }
+        // TODO: include scores here.
         Ok(serde_json::to_string(&self.game)?)
     }
 

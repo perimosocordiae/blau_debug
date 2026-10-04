@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vanilla-jsoneditor@3.5.0/themes/jse-theme-dark.css">
+  <style>
+    :root {
+      /* Crucial: You must enable both schemes for light-dark() to work */
+      color-scheme: light dark;
+
+      /* Define your color variables using light-dark(lightMode, darkMode) */
+      --bg-color: light-dark(#ffffff, #121212);
+      --text-color: light-dark(#333333, #f5f5f5);
+      --accent-color: light-dark(#0066cc, #4da6ff);
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: system-ui, sans-serif;
+    }
+
+    a {
+      color: var(--accent-color);
+    }
+
+    .main {
+      display: flex;
+      flex-flow: row nowrap;
+      gap: 1em;
+    }
+
+    #jsoneditor {
+      width: 70ex;
+      height: 30em;
+    }
+
+    #gameLog {
+      max-height: 30em;
+      overflow-y: auto;
+    }
+    .log-entry {
+      min-height: 1em;
+    }
+    .log-entry.outgoing {
+      color: var(--accent-color);
+    }
+    .log-entry.incoming {
+      color: var(--text-color);
+    }
+  </style>
+</head>
+
+<h1>{{ game_path }}</h1>
+<div class="main">
+  <div id="jsoneditor" class="jse-theme-dark"></div>
+  <button id="sendButton" style="align-self: center">Send</button>
+  <div id="jsonviewer" class="jse-theme-dark"></div>
+</div>
+<br>
+<fieldset>
+  <legend>Game Log</legend>
+  <div id="gameLog"></div>
+</fieldset>
+
+
+<script type="module">
+  import { createJSONEditor } from 'https://cdn.jsdelivr.net/npm/vanilla-jsoneditor/standalone.js'
+
+  const sendButton = document.getElementById('sendButton');
+  const gameLog = document.getElementById('gameLog');
+
+  function addToLog(text, isOutgoing) {
+    const logEntry = document.createElement('div');
+    logEntry.classList.add('log-entry', isOutgoing ? 'outgoing' : 'incoming');
+    logEntry.textContent = text;
+    gameLog.appendChild(logEntry);
+  }
+
+  const editor = createJSONEditor({
+    target: document.getElementById('jsoneditor'),
+    props: {
+      navigationBar: false,
+      content: {
+        json: {
+          players: [
+            ["P1", null],
+            ["P2", null]
+          ]
+        }
+      }
+    }
+  });
+  window.editor = editor;
+  const viewer = createJSONEditor({
+    target: document.getElementById('jsonviewer'),
+    props: {
+      readOnly: true,
+      navigationBar: false,
+    }
+  });
+  sendButton.addEventListener('click', () => {
+    const content = editor.get();
+    const json = content.json || JSON.parse(content.text);
+    const jsonStr = JSON.stringify(json);
+    addToLog(jsonStr, true);
+    fetch('/update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: jsonStr
+    }).then(response => response.json())
+      .then(data => {
+        addToLog(JSON.stringify(data, null, 2), false);
+        viewer.set({ json: data });
+      });
+  });
+</script>
