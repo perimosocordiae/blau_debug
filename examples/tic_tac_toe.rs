@@ -169,5 +169,6 @@ impl DynSafeGameAPI for TicTacToe {
 }
 
 fn main() {
+    env_logger::init();
     run_server::<TicTacToe>();
 }
