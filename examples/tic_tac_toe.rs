@@ -8,7 +8,7 @@ enum GridCell {
     O,
     Empty,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct GameState {
     grid: [[GridCell; 3]; 3],
     curr_player_idx: usize,
@@ -24,6 +24,40 @@ impl GameState {
         }
         Err("No empty cell".into())
     }
+    fn winner(&self) -> Option<GridCell> {
+        let grid = &self.grid;
+        for row in grid.iter() {
+            if row[0] != GridCell::Empty && row[0] == row[1] && row[1] == row[2] {
+                return Some(row[0]);
+            }
+        }
+        for c in 0..3 {
+            if grid[0][c] != GridCell::Empty && grid[0][c] == grid[1][c] && grid[1][c] == grid[2][c]
+            {
+                return Some(grid[0][c]);
+            }
+        }
+        if grid[0][0] != GridCell::Empty && grid[0][0] == grid[1][1] && grid[1][1] == grid[2][2] {
+            return Some(grid[0][0]);
+        }
+        if grid[0][2] != GridCell::Empty && grid[0][2] == grid[1][1] && grid[1][1] == grid[2][0] {
+            return Some(grid[0][2]);
+        }
+        // If no cells are Empty and no winner, it's a draw, represented by returning Empty.
+        if grid
+            .iter()
+            .all(|row| row.iter().all(|&cell| cell != GridCell::Empty))
+        {
+            return Some(GridCell::Empty);
+        }
+        None
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct FinalState {
+    game: GameState,
+    winner: GridCell,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -35,7 +69,7 @@ struct Action {
 struct TicTacToe {
     game: GameState,
     player_info: Vec<PlayerInfo>,
-    game_over: bool,
+    winner: Option<GridCell>,
 }
 impl TicTacToe {
     fn do_action<F: FnMut(&str, &str)>(&mut self, action: &Action, mut notice_cb: F) -> Result<()> {
@@ -53,29 +87,11 @@ impl TicTacToe {
             }
         }
         // Check for game over.
-        let grid = &self.game.grid;
-        if grid[0][0] == new_cell {
-            self.game_over = (grid[0][1] == new_cell && grid[0][2] == new_cell)
-                || (grid[1][0] == new_cell && grid[2][0] == new_cell)
-                || (grid[1][1] == new_cell && grid[2][2] == new_cell);
-        } else if grid[0][1] == new_cell {
-            self.game_over = grid[1][1] == new_cell && grid[2][1] == new_cell;
-        } else if grid[0][2] == new_cell {
-            self.game_over = (grid[1][2] == new_cell && grid[2][2] == new_cell)
-                || (grid[1][1] == new_cell && grid[2][0] == new_cell);
-        } else if grid[1][0] == new_cell {
-            self.game_over = grid[1][1] == new_cell && grid[1][2] == new_cell;
-        } else if grid[2][0] == new_cell {
-            self.game_over = grid[2][1] == new_cell && grid[2][2] == new_cell;
-        }
+        self.winner = self.game.winner();
         // Next player.
-        if !self.game_over {
-            if self.game.empty_cell().is_ok() {
-                self.game.curr_player_idx += 1;
-                self.game.curr_player_idx %= 2;
-            } else {
-                self.game_over = true; // Cat's game.
-            }
+        if self.winner.is_none() {
+            self.game.curr_player_idx += 1;
+            self.game.curr_player_idx %= 2;
         }
 
         let view = serde_json::to_string(&self.game)?;
@@ -85,7 +101,7 @@ impl TicTacToe {
         Ok(())
     }
     fn process_agents<F: FnMut(&str, &str)>(&mut self, mut notice_cb: F) -> Result<()> {
-        while !self.game_over && self.player_info[self.game.curr_player_idx].level.is_some() {
+        while self.winner.is_none() && self.player_info[self.game.curr_player_idx].level.is_some() {
             let (row, col) = self.game.empty_cell()?;
             self.do_action(&Action { row, col }, &mut notice_cb)?;
         }
@@ -108,14 +124,14 @@ impl GameAPI for TicTacToe {
         Ok(Self {
             game,
             player_info: players.to_vec(),
-            game_over: false,
+            winner: None,
         })
     }
     fn restore(players: &[PlayerInfo], final_state: &str) -> Result<Self> {
-        let game: GameState = serde_json::from_str(final_state)?;
+        let fs: FinalState = serde_json::from_str(final_state)?;
         let mut res = Self::init(players, None)?;
-        res.game = game;
-        res.game_over = true;
+        res.game = fs.game;
+        res.winner = Some(fs.winner);
         Ok(res)
     }
     fn start<F: FnMut(&str, &str)>(&mut self, game_id: i64, mut notice_cb: F) -> Result<()> {
@@ -132,7 +148,7 @@ impl GameAPI for TicTacToe {
         action: &str,
         mut notice_cb: F,
     ) -> Result<()> {
-        if self.game_over {
+        if self.winner.is_some() {
             return Err("Game is over".into());
         }
         let action: Action = serde_json::from_str(action)?;
@@ -144,15 +160,17 @@ impl GameAPI for TicTacToe {
 }
 impl DynSafeGameAPI for TicTacToe {
     fn is_game_over(&self) -> bool {
-        self.game_over
+        self.winner.is_some()
     }
 
     fn final_state(&self) -> Result<String> {
-        if !self.game_over {
-            return Err("Game is not finished".into());
+        match self.winner {
+            Some(w) => Ok(serde_json::to_string(&FinalState {
+                game: self.game.clone(),
+                winner: w,
+            })?),
+            None => Err("Game is not finished".into()),
         }
-        // TODO: include scores here.
-        Ok(serde_json::to_string(&self.game)?)
     }
 
     fn player_view(&self, _player_id: &str) -> Result<String> {
@@ -164,8 +182,11 @@ impl DynSafeGameAPI for TicTacToe {
     }
 
     fn player_scores(&self) -> Vec<i32> {
-        // TODO: check for three in a row
-        vec![0, 0]
+        match self.winner {
+            Some(GridCell::X) => vec![1, 0],
+            Some(GridCell::O) => vec![0, 1],
+            _ => vec![0, 0],
+        }
     }
 }
 
